@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Moon Base Mission Trainer - Lunar Cadets</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#1b2142;--panel:#262e5a;--ink:#f3efe6;--dim:#b9bdd6;--pow:#ffb347;--oxy:#5cd6e0;--shd:#b79cff;--bad:#ff6b6b;--ok:#7be0a0}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:500 18px/1.45 "Baloo 2",system-ui,sans-serif}
+main{max-width:560px;margin:0 auto;padding:16px}
+h1{font-size:28px;margin:8px 0}
+.panel{background:var(--panel);border-radius:18px;padding:16px;margin:12px 0}
+.dim{color:var(--dim);font-size:15px}
+button{font:700 18px "Baloo 2",system-ui,sans-serif;border:0;border-radius:14px;padding:12px 18px;background:var(--ink);color:var(--bg);cursor:pointer}
+button:focus-visible{outline:3px solid var(--pow);outline-offset:2px}
+button.big{width:100%;margin-top:10px}
+.row{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:10px 0}
+.step{display:flex;align-items:center;gap:12px}
+.step button{width:44px;height:44px;padding:0;font-size:24px}
+.bar{height:14px;border-radius:8px;background:#11162f;overflow:hidden}
+.bar i{display:block;height:100%}
+.alert{border-left:6px solid var(--pow);padding-left:12px}
+.hidden{display:none}
+.lose{color:var(--bad)}.win{color:var(--ok)}
+</style>
+</head>
+<body>
+<main>
+<h1>Moon Base Mission Trainer</h1>
+
+<section id="start" class="panel">
+  <p>You run a small base on the Moon for 10 days (called sols here). Each day you get a little power. Spend it on <b>Oxygen</b> or <b>Shielding</b>. You cannot save power, so every choice costs something.</p>
+  <p>Space weather from the Sun can hit the base. Strong shielding protects your crew. Crew health and oxygen must stay above zero.</p>
+  <button class="big" id="go">Start mission</button>
+  <p class="dim" id="src">Checking NASA space weather data...</p>
+</section>
+
+<section id="game" class="panel hidden">
+  <div class="row"><b id="sol"></b><span id="night" class="dim"></span></div>
+  <div class="alert" id="alert"></div>
+  <div class="row"><span>Crew health</span><b id="hp"></b></div>
+  <div class="bar"><i id="hpb" style="background:var(--ok)"></i></div>
+  <div class="row"><span>Oxygen</span><b id="ox"></b></div>
+  <div class="bar"><i id="oxb" style="background:var(--oxy)"></i></div>
+  <div class="row"><span>Shield strength</span><b id="sh"></b></div>
+  <div class="bar"><i id="shb" style="background:var(--shd)"></i></div>
+  <hr style="border:0;border-top:1px solid #3a4379;margin:16px 0">
+  <p>Power today: <b id="pw" style="color:var(--pow)"></b>. Unused power is lost.</p>
+  <div class="row"><span>Oxygen maker</span><div class="step"><button id="om" aria-label="less oxygen power">-</button><b id="oa">0</b><button id="op" aria-label="more oxygen power">+</button></div></div>
+  <div class="row"><span>Shield booster</span><div class="step"><button id="sm" aria-label="less shield power">-</button><b id="sa">0</b><button id="sp" aria-label="more shield power">+</button></div></div>
+  <button class="big" id="run">Finish the day</button>
+  <p id="report" aria-live="polite"></p>
+</section>
+
+<section id="end" class="panel hidden">
+  <h2 id="endt"></h2>
+  <p id="endp"></p>
+  <button class="big" id="again">Play again</button>
+</section>
+
+<p class="dim">Space weather data: NASA DONKI (api.nasa.gov). Made by Lunar Cadets for the NASA Space Apps Challenge 2026. Not an official NASA product.</p>
+</main>
+
+<script>
+// ---- Settings (change these to tune the game) ----
+var API_KEY = "DEMO_KEY";      // replace with your own free key from api.nasa.gov
+var SOLS = 10;
+var DAY_POWER = 6, NIGHT_POWER = 3, NIGHT_SOLS = [5, 6, 7];
+var O2_USE = 3, SHIELD_DECAY = 1, MAX_O2 = 12, MAX_SHIELD = 10, MAX_HP = 10;
+// Practice storms used only if NASA data cannot be loaded. NOT real data.
+var PRACTICE = [0,1,0,2,1,0,3,1,2,0];
+
+var live = [];          // real events from DONKI: {sev, label}
+var usingLive = false;
+var st, plan;
+
+function $(id){ return document.getElementById(id); }
+
+// Flare class -> severity: X=3, M=2, C=1, A/B=0
+function sevOf(c){ var k = (c || "")[0]; return k==="X"?3 : k==="M"?2 : k==="C"?1 : 0; }
+
+function loadDonki(){
+  var end = new Date(), start = new Date(Date.now() - 30*86400000);
+  var f = function(d){ return d.toISOString().slice(0,10); };
+  var url = "https://api.nasa.gov/DONKI/FLR?startDate="+f(start)+"&endDate="+f(end)+"&api_key="+API_KEY;
+  fetch(url).then(function(r){ return r.json(); }).then(function(a){
+    live = a.filter(function(e){ return e.classType; }).map(function(e){
+      return { sev: sevOf(e.classType), label: e.classType + " solar flare, " + (e.peakTime||"").slice(0,10) };
+    });
+    usingLive = live.length > 0;
+    $("src").textContent = usingLive
+      ? "Using real solar flares from NASA DONKI (last 30 days): " + live.length + " found."
+      : "No NASA events found. Using practice storms (not real data).";
+  }).catch(function(){
+    $("src").textContent = "Could not reach NASA DONKI. Using practice storms (not real data).";
+  });
+}
+
+function buildPlan(){
+  var p = [];
+  if (usingLive){
+    var pool = live.slice().sort(function(){ return Math.random()-0.5; });
+    for (var i=0;i<SOLS;i++) p.push(pool[i] || { sev:0, label:"Quiet Sun" });
+  } else {
+    PRACTICE.slice().sort(function(){ return Math.random()-0.5; })
+      .forEach(function(s){ p.push({ sev:s, label:"Practice storm (not real data)" }); });
+  }
+  return p;
+}
+
+function newGame(){
+  st = { sol:1, hp:MAX_HP, o2:8, sh:4, oa:0, sa:0 };
+  plan = buildPlan();
+  $("start").classList.add("hidden"); $("end").classList.add("hidden");
+  $("game").classList.remove("hidden");
+  $("report").textContent = "";
+  draw();
+}
+
+function power(){ return NIGHT_SOLS.indexOf(st.sol) >= 0 ? NIGHT_POWER : DAY_POWER; }
+
+function draw(){
+  var ev = plan[st.sol-1], night = NIGHT_SOLS.indexOf(st.sol) >= 0;
+  $("sol").textContent = "Sol " + st.sol + " of " + SOLS;
+  $("night").textContent = night ? "Lunar night: less sunlight, less power" : "Daylight: full power";
+  var warn = ["Calm Sun. No storm expected.","Small storm coming. A little shielding helps.","Strong storm coming! Shielding matters.","Huge storm coming! Protect the crew!"][ev.sev];
+  $("alert").textContent = "Space weather alert: " + ev.label + ". " + warn;
+  $("pw").textContent = power();
+  $("hp").textContent = st.hp + "/" + MAX_HP; $("hpb").style.width = (st.hp/MAX_HP*100)+"%";
+  $("ox").textContent = st.o2 + "/" + MAX_O2; $("oxb").style.width = (st.o2/MAX_O2*100)+"%";
+  $("sh").textContent = st.sh + "/" + MAX_SHIELD; $("shb").style.width = (st.sh/MAX_SHIELD*100)+"%";
+  $("oa").textContent = st.oa; $("sa").textContent = st.sa;
+}
+
+function change(which, d){
+  var o = st.oa + (which==="o" ? d : 0), s = st.sa + (which==="s" ? d : 0);
+  if (o < 0 || s < 0 || o + s > power()) return;
+  st.oa = o; st.sa = s; draw();
+}
+
+function finishDay(){
+  var ev = plan[st.sol-1];
+  st.o2 = Math.min(MAX_O2, st.o2 + st.oa - O2_USE);
+  st.sh = Math.max(0, Math.min(MAX_SHIELD, st.sh + st.sa - SHIELD_DECAY));
+  // Radiation: stronger storm = more damage; shield strength blocks some.
+  // TODO: calibrate these numbers with real RadLab dose data before claiming it on the project page.
+  var blocked = Math.floor(st.sh/2), raw = ev.sev*2, hit = Math.max(0, raw - blocked);
+  st.hp -= hit;
+  var msg = "Oxygen " + (st.oa-O2_USE>=0?"+":"") + (st.oa-O2_USE) + ". ";
+  msg += ev.sev === 0 ? "The Sun was calm. " : "The storm had " + raw + " radiation; your shield blocked " + Math.min(raw, blocked) + ". ";
+  msg += hit > 0 ? "The crew lost " + hit + " health." : "The crew stayed safe.";
+  st.oa = 0; st.sa = 0;
+  if (st.o2 <= 0 || st.hp <= 0){ return end(false, st.o2 <= 0 ? "The base ran out of oxygen." : "The crew took too much radiation."); }
+  if (st.sol >= SOLS){ return end(true, "Your crew survived all " + SOLS + " sols."); }
+  st.sol++; draw(); $("report").textContent = msg;
+}
+
+function end(won, why){
+  $("game").classList.add("hidden"); $("end").classList.remove("hidden");
+  $("endt").textContent = won ? "Mission success!" : "Mission over"; $("endt").className = won ? "win" : "lose";
+  $("endp").textContent = why + (won ? " Real mission planners balance power, air and shielding every day." :
+    " Try again: real astronauts learn from every mission. Power spent on one thing cannot be spent on another.");
+}
+
+$("go").onclick = newGame; $("again").onclick = newGame; $("run").onclick = finishDay;
+$("om").onclick = function(){ change("o",-1); }; $("op").onclick = function(){ change("o",1); };
+$("sm").onclick = function(){ change("s",-1); }; $("sp").onclick = function(){ change("s",1); };
+loadDonki();
+</script>
+</body>
+</html>
