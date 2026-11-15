@@ -1,0 +1,1 @@
+Moon Base Mission Trainer by Lunar Cadets (NASA Space Apps Challenge 2026). The game code was written with AI assistance (Claude). Space weather data: NASA DONKI via api.nasa.gov. Radiation numbers in the game are simplified and not calibrated with RadLab.
